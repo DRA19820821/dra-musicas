@@ -1,3 +1,4 @@
+# docker-compose.yml (CORRIGIDO)
 services:
   backend:
     build:
@@ -12,39 +13,29 @@ services:
     ports:
       - "8000:8000"
     depends_on:
-      - suno_api
+      - suno-api
 
-  # This service provides the unofficial Suno API wrapper. It is
-  # configured with environment variables for the user's cookie and
-  # 2Captcha key. To enable the real integration, uncomment and set
-  # the appropriate env values. Here it's included for completeness
-  # but will not function without valid credentials.
-    suno-api:
-      build: ./suno_api
-      env_file:             # lê todas as variáveis do .env
+  # O serviço 'suno-api' foi movido para o nível correto
+  suno-api:
+    # Usando a imagem pública recomendada em vez de um build local
+    image: ghcr.io/gcui-art/suno-api:v1.2.3-full
+    env_file:
       - .env
-      environment:
-        - BROWSER=chromium
-        - BROWSER_GHOST_CURSOR=false
-        - BROWSER_LOCALE=en
-        - BROWSER_HEADLESS=true
-      ports:
-        - "3000:3000"
-      volumes:
-        - ./suno-api/public:/app/public
-    # build context removed; pulling image instead
+    environment:
+      - BROWSER=chromium
+      - BROWSER_GHOST_CURSOR=false
+      - BROWSER_LOCALE=en
+      - BROWSER_HEADLESS=true
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./suno-api/public:/app/public
 
-  # Optionally include a Redis instance for Celery. Not used in this
-  # simplified implementation but defined here for completeness.
   redis:
     image: redis:7-alpine
     ports:
       - "6379:6379"
 
-  # Optionally include a Postgres database. The backend currently uses
-  # SQLite by default; to switch to Postgres set DATABASE_URL to the
-  # following and enable this service:
-  # DATABASE_URL=postgresql+psycopg2://user:password@postgres/suno
   postgres:
     image: postgres:15-alpine
     environment:
@@ -58,4 +49,4 @@ services:
 
 volumes:
   postgres_data:
-  suno_api_public:
+  # O volume suno_api_public não é mais necessário com a imagem pública
