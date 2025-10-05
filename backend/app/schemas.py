@@ -1,18 +1,24 @@
+# backend/app/schemas.py (CORRIGIDO)
 """
 Pydantic schemas for request and response models.
-
-These classes define the validation and serialization logic for the
-REST API. They closely mirror the ORM models defined in
-``models.py`` but may omit internal fields (such as database
-identifiers) or compute additional properties for convenience.
 """
 
 import datetime
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, ConfigDict
 
 from .models import StatusEnum
+
+
+# Novo schema para os eventos de log
+class EventoFaixa(BaseModel):
+    id: int
+    timestamp: datetime.datetime
+    etapa: str
+    detalhe: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class FaixaBase(BaseModel):
@@ -22,7 +28,7 @@ class FaixaBase(BaseModel):
     duracao_alvo: float = Field(
         360.0, description="Target duration for the track in seconds"
     )
-    metadata: Optional[Dict[str, Any]] = None
+    faixa_metadata: Optional[Dict[str, Any]] = None
 
 
 class FaixaCreate(FaixaBase):
@@ -45,9 +51,11 @@ class Faixa(FaixaBase):
     tempo_geracao: Optional[datetime.datetime] = None
     tempo_download: Optional[datetime.datetime] = None
     erros: Optional[Dict[str, Any]] = None
+    # Adicionada a lista de eventos para ser retornada na API
+    eventos: List[EventoFaixa] = []
 
-    class Config:
-        orm_mode = True
+    # 'orm_mode' foi atualizado para 'from_attributes' em Pydantic V2
+    model_config = ConfigDict(from_attributes=True)
 
 
 class LoteCreate(BaseModel):
@@ -81,5 +89,4 @@ class Lote(BaseModel):
     total_arquivos: int
     faixas: List[Faixa] = []
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)

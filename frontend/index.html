@@ -4,81 +4,146 @@
     <meta charset="UTF-8">
     <title>Suno Batch Processor</title>
     <style>
-        body { font-family: Arial, sans-serif; margin: 2rem; }
-        label { display: block; margin-top: 1rem; }
-        input, select { margin-top: 0.5rem; }
-        #status { margin-top: 2rem; white-space: pre-line; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 2rem; background-color: #f4f4f9; color: #333; }
+        h1 { color: #444; }
+        form { background: #fff; padding: 2rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        label { display: block; margin-top: 1rem; font-weight: bold; }
+        input, select, button { width: 100%; padding: 0.8rem; margin-top: 0.5rem; border-radius: 4px; border: 1px solid #ddd; box-sizing: border-box; }
+        button { background-color: #007bff; color: white; font-weight: bold; border: none; cursor: pointer; margin-top: 1.5rem; }
+        button:hover { background-color: #0056b3; }
+        #status { margin-top: 2rem; }
+        table { width: 100%; border-collapse: collapse; margin-top: 1rem; background: #fff; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        th, td { padding: 1rem; text-align: left; border-bottom: 1px solid #eee; }
+        th { background-color: #f8f8f8; }
+        .logs-container { max-height: 200px; overflow-y: auto; background-color: #282c34; color: #abb2bf; padding: 1rem; border-radius: 4px; font-family: "Courier New", Courier, monospace; font-size: 0.9em; white-space: pre-wrap; margin-top: 0.5rem; display: none; }
+        .log-entry { border-bottom: 1px solid #444; padding-bottom: 5px; margin-bottom: 5px; }
+        .log-timestamp { color: #61afef; }
+        .log-etapa { color: #98c379; font-weight: bold; }
+        .toggle-logs { font-size: 0.8em; padding: 0.3rem 0.6rem; width: auto; background-color: #6c757d; }
+        .toggle-logs:hover { background-color: #5a6268; }
     </style>
 </head>
 <body>
     <h1>Suno Batch Processor</h1>
     <form id="uploadForm">
-        <label>
-            Selecione arquivos JSON:
-            <input type="file" id="jsonFiles" name="files" multiple accept="application/json">
-        </label>
-        <label>
-            Modelo Suno:
-            <select id="modelo" name="modelo">
-                <option value="v4.5">v4.5</option>
-                <option value="v5">v5</option>
-            </select>
-        </label>
-        <label>
-            Duração alvo (segundos):
-            <input type="number" id="duracao_alvo" name="duracao_alvo" value="360">
-        </label>
-        <label>
-            Concurrency (1–4):
-            <input type="number" id="concurrency" name="concurrency" value="2" min="1" max="4">
-        </label>
-        <button type="submit">Iniciar processamento</button>
+        <label for="jsonFiles">Selecione arquivos JSON:</label>
+        <input type="file" id="jsonFiles" name="files" multiple accept="application/json" required>
+        
+        <label for="modelo">Modelo Suno:</label>
+        <select id="modelo" name="modelo">
+            <option value="chirp-v3-0">v3</option>
+            <option value="chirp-v3-5" selected>v3.5</option>
+        </select>
+        
+        <label for="duracao_alvo">Duração alvo (segundos):</label>
+        <input type="number" id="duracao_alvo" name="duracao_alvo" value="235">
+        
+        <label for="concurrency">Processos Paralelos (1–4):</label>
+        <input type="number" id="concurrency" name="concurrency" value="2" min="1" max="4">
+        
+        <button type="submit">Iniciar Processamento</button>
     </form>
+    
     <div id="status"></div>
 
 <script>
 document.getElementById('uploadForm').addEventListener('submit', async function(e) {
     e.preventDefault();
-    const filesInput = document.getElementById('jsonFiles');
-    const formData = new FormData();
-    for (const file of filesInput.files) {
-        formData.append('files', file);
-    }
-    formData.append('modelo', document.getElementById('modelo').value);
-    formData.append('duracao_alvo', document.getElementById('duracao_alvo').value);
-    formData.append('concurrency', document.getElementById('concurrency').value);
+    const formData = new FormData(this);
     const statusDiv = document.getElementById('status');
-    statusDiv.textContent = 'Enviando e processando...';
+    statusDiv.innerHTML = '<p>Enviando e iniciando processamento...</p>';
+    
     try {
-        const response = await fetch('/lotes', {
-            method: 'POST',
-            body: formData
-        });
+        const response = await fetch('/lotes', { method: 'POST', body: formData });
         if (!response.ok) {
             const err = await response.json();
-            statusDiv.textContent = 'Erro: ' + err.detail;
-            return;
+            throw new Error('Falha na criação do lote: ' + (err.detail || response.statusText));
         }
+        
         const lote = await response.json();
-        statusDiv.textContent = 'Lote criado com ID ' + lote.id + '.\nAguarde enquanto as faixas são processadas.';
-        // Poll for status updates
+        statusDiv.innerHTML = `<h3>Lote ${lote.id} criado com ${lote.total_arquivos} faixas.</h3><div id="progress-table"></div>`;
+        
         const pollInterval = setInterval(async () => {
-            const res = await fetch('/lotes/' + lote.id);
-            const data = await res.json();
-            let text = 'Lote ' + data.id + ' (Total faixas: ' + data.total_arquivos + ')\n';
-            for (const faixa of data.faixas) {
-                text += `Faixa ${faixa.id} - ${faixa.titulo}: ${faixa.status}` +\n\n;
-            }
-            statusDiv.textContent = text;
-            const allDone = data.faixas.every(f => f.status === 'finalizada' || f.status === 'erro');
-            if (allDone) {
-                clearInterval(pollInterval);
+            try {
+                const res = await fetch('/lotes/' + lote.id);
+                if (!res.ok) return;
+
+                const data = await res.json();
+                renderTable(data.faixas);
+
+                const allDone = data.faixas.every(f => f.status === 'finalizada' || f.status === 'erro');
+                if (allDone) {
+                    statusDiv.innerHTML += "<p><strong>Processamento de todas as faixas concluído!</strong></p>";
+                    clearInterval(pollInterval);
+                }
+            } catch (pollErr) {
+                console.error("Polling error:", pollErr);
             }
         }, 3000);
     } catch (err) {
-        statusDiv.textContent = 'Erro ao enviar: ' + err;
+        statusDiv.textContent = 'Erro ao enviar: ' + err.message;
     }
 });
+
+function renderTable(faixas) {
+    const tableContainer = document.getElementById('progress-table');
+    let tableHTML = `
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Título</th>
+                    <th>Status</th>
+                    <th>Duração</th>
+                    <th>Último Evento</th>
+                    <th>Ações</th>
+                </tr>
+            </thead>
+            <tbody>
+    `;
+
+    for (const faixa of faixas) {
+        const lastEvent = faixa.eventos.length > 0 ? faixa.eventos[faixa.eventos.length - 1] : { etapa: '-', detalhe: '' };
+        const duracao = faixa.duracao_final ? `${faixa.duracao_final.toFixed(1)}s` : '-';
+        
+        tableHTML += `
+            <tr>
+                <td>${faixa.id}</td>
+                <td>${faixa.titulo}</td>
+                <td>${faixa.status}</td>
+                <td>${duracao}</td>
+                <td>${lastEvent.etapa}: ${lastEvent.detalhe || ''}</td>
+                <td>
+                    <button class="toggle-logs" onclick="toggleLogs(${faixa.id})">Ver Logs</button>
+                    ${faixa.caminho_arquivo ? `<a href="/faixas/${faixa.id}/download" target="_blank">Download</a>` : ''}
+                </td>
+            </tr>
+            <tr>
+                <td colspan="6">
+                    <div class="logs-container" id="logs-${faixa.id}">
+                        ${faixa.eventos.map(evt => `
+                            <div class="log-entry">
+                                <span class="log-timestamp">[${new Date(evt.timestamp).toLocaleTimeString()}]</span>
+                                <span class="log-etapa">${evt.etapa}:</span>
+                                ${evt.detalhe || ''}
+                            </div>
+                        `).join('')}
+                    </div>
+                </td>
+            </tr>
+        `;
+    }
+
+    tableHTML += '</tbody></table>';
+    tableContainer.innerHTML = tableHTML;
+}
+
+function toggleLogs(faixaId) {
+    const logContainer = document.getElementById(`logs-${faixaId}`);
+    if (logContainer) {
+        logContainer.style.display = logContainer.style.display === 'block' ? 'none' : 'block';
+    }
+}
 </script>
 </body>
 </html>

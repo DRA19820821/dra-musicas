@@ -1,4 +1,4 @@
-# docker-compose.yml (CORRIGIDO)
+# docker-compose.yml (CORRIGIDO PARA BUILD LOCAL)
 services:
   backend:
     build:
@@ -15,10 +15,9 @@ services:
     depends_on:
       - suno-api
 
-  # O serviço 'suno-api' foi movido para o nível correto
+  # Esta seção agora constrói a imagem a partir da pasta 'suno-api' local.
   suno-api:
-    # Usando a imagem pública recomendada em vez de um build local
-    image: ghcr.io/gcui-art/suno-api:v1.2.3-full
+    build: ./suno-api
     env_file:
       - .env
     environment:
@@ -49,4 +48,3 @@ services:
 
 volumes:
   postgres_data:
-  # O volume suno_api_public não é mais necessário com a imagem pública
