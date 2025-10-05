@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Suno Batch Processor</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 2rem; }
+        label { display: block; margin-top: 1rem; }
+        input, select { margin-top: 0.5rem; }
+        #status { margin-top: 2rem; white-space: pre-line; }
+    </style>
+</head>
+<body>
+    <h1>Suno Batch Processor</h1>
+    <form id="uploadForm">
+        <label>
+            Selecione arquivos JSON:
+            <input type="file" id="jsonFiles" name="files" multiple accept="application/json">
+        </label>
+        <label>
+            Modelo Suno:
+            <select id="modelo" name="modelo">
+                <option value="v4.5">v4.5</option>
+                <option value="v5">v5</option>
+            </select>
+        </label>
+        <label>
+            Duração alvo (segundos):
+            <input type="number" id="duracao_alvo" name="duracao_alvo" value="360">
+        </label>
+        <label>
+            Concurrency (1–4):
+            <input type="number" id="concurrency" name="concurrency" value="2" min="1" max="4">
+        </label>
+        <button type="submit">Iniciar processamento</button>
+    </form>
+    <div id="status"></div>
+
+<script>
+document.getElementById('uploadForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    const filesInput = document.getElementById('jsonFiles');
+    const formData = new FormData();
+    for (const file of filesInput.files) {
+        formData.append('files', file);
+    }
+    formData.append('modelo', document.getElementById('modelo').value);
+    formData.append('duracao_alvo', document.getElementById('duracao_alvo').value);
+    formData.append('concurrency', document.getElementById('concurrency').value);
+    const statusDiv = document.getElementById('status');
+    statusDiv.textContent = 'Enviando e processando...';
+    try {
+        const response = await fetch('/lotes', {
+            method: 'POST',
+            body: formData
+        });
+        if (!response.ok) {
+            const err = await response.json();
+            statusDiv.textContent = 'Erro: ' + err.detail;
+            return;
+        }
+        const lote = await response.json();
+        statusDiv.textContent = 'Lote criado com ID ' + lote.id + '.\nAguarde enquanto as faixas são processadas.';
+        // Poll for status updates
+        const pollInterval = setInterval(async () => {
+            const res = await fetch('/lotes/' + lote.id);
+            const data = await res.json();
+            let text = 'Lote ' + data.id + ' (Total faixas: ' + data.total_arquivos + ')\n';
+            for (const faixa of data.faixas) {
+                text += `Faixa ${faixa.id} - ${faixa.titulo}: ${faixa.status}` +\n\n;
+            }
+            statusDiv.textContent = text;
+            const allDone = data.faixas.every(f => f.status === 'finalizada' || f.status === 'erro');
+            if (allDone) {
+                clearInterval(pollInterval);
+            }
+        }, 3000);
+    } catch (err) {
+        statusDiv.textContent = 'Erro ao enviar: ' + err;
+    }
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,61 @@
+services:
+  backend:
+    build:
+      context: ./backend
+    volumes:
+      - ./backend/app:/app/app
+      - ./frontend:/app/frontend:ro
+      - ./generated_audio:/app/generated_audio
+    environment:
+      - DATABASE_URL=sqlite:///./suno.db
+      - OUTPUT_DIR=/app/generated_audio
+    ports:
+      - "8000:8000"
+    depends_on:
+      - suno_api
+
+  # This service provides the unofficial Suno API wrapper. It is
+  # configured with environment variables for the user's cookie and
+  # 2Captcha key. To enable the real integration, uncomment and set
+  # the appropriate env values. Here it's included for completeness
+  # but will not function without valid credentials.
+    suno-api:
+      build: ./suno_api
+      env_file:             # lê todas as variáveis do .env
+      - .env
+      environment:
+        - BROWSER=chromium
+        - BROWSER_GHOST_CURSOR=false
+        - BROWSER_LOCALE=en
+        - BROWSER_HEADLESS=true
+      ports:
+        - "3000:3000"
+      volumes:
+        - ./suno-api/public:/app/public
+    # build context removed; pulling image instead
+
+  # Optionally include a Redis instance for Celery. Not used in this
+  # simplified implementation but defined here for completeness.
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  # Optionally include a Postgres database. The backend currently uses
+  # SQLite by default; to switch to Postgres set DATABASE_URL to the
+  # following and enable this service:
+  # DATABASE_URL=postgresql+psycopg2://user:password@postgres/suno
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: suno
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:
+  suno_api_public:
