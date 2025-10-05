@@ -31,9 +31,7 @@
         
         <label for="modelo">Modelo Suno:</label>
         <select id="modelo" name="modelo">
-            <option value="chirp-v3-0">v3</option>
-            <option value="chirp-v3-5" selected>v3.5</option>
-        </select>
+            </select>
         
         <label for="duracao_alvo">Duração alvo (segundos):</label>
         <input type="number" id="duracao_alvo" name="duracao_alvo" value="235">
@@ -47,103 +45,131 @@
     <div id="status"></div>
 
 <script>
-document.getElementById('uploadForm').addEventListener('submit', async function(e) {
-    e.preventDefault();
-    const formData = new FormData(this);
-    const statusDiv = document.getElementById('status');
-    statusDiv.innerHTML = '<p>Enviando e iniciando processamento...</p>';
-    
-    try {
-        const response = await fetch('/lotes', { method: 'POST', body: formData });
-        if (!response.ok) {
-            const err = await response.json();
-            throw new Error('Falha na criação do lote: ' + (err.detail || response.statusText));
-        }
-        
-        const lote = await response.json();
-        statusDiv.innerHTML = `<h3>Lote ${lote.id} criado com ${lote.total_arquivos} faixas.</h3><div id="progress-table"></div>`;
-        
-        const pollInterval = setInterval(async () => {
-            try {
-                const res = await fetch('/lotes/' + lote.id);
-                if (!res.ok) return;
-
-                const data = await res.json();
-                renderTable(data.faixas);
-
-                const allDone = data.faixas.every(f => f.status === 'finalizada' || f.status === 'erro');
-                if (allDone) {
-                    statusDiv.innerHTML += "<p><strong>Processamento de todas as faixas concluído!</strong></p>";
-                    clearInterval(pollInterval);
-                }
-            } catch (pollErr) {
-                console.error("Polling error:", pollErr);
+    // Este script é executado quando a página termina de carregar
+    document.addEventListener('DOMContentLoaded', async () => {
+        try {
+            // 1. Busca a lista de modelos da API
+            const response = await fetch('/models');
+            if (!response.ok) {
+                throw new Error(`Não foi possível buscar os modelos da API. Status: ${response.status}`);
             }
-        }, 3000);
-    } catch (err) {
-        statusDiv.textContent = 'Erro ao enviar: ' + err.message;
-    }
-});
+            const data = await response.json();
+            
+            // 2. Encontra o elemento <select> na página
+            const modeloSelect = document.getElementById('modelo');
+            modeloSelect.innerHTML = ''; // Limpa quaisquer opções que possam existir
 
-function renderTable(faixas) {
-    const tableContainer = document.getElementById('progress-table');
-    let tableHTML = `
-        <table>
-            <thead>
-                <tr>
-                    <th>ID</th>
-                    <th>Título</th>
-                    <th>Status</th>
-                    <th>Duração</th>
-                    <th>Último Evento</th>
-                    <th>Ações</th>
-                </tr>
-            </thead>
-            <tbody>
-    `;
+            // 3. Preenche o seletor com os modelos recebidos
+            data.models.forEach(model => {
+                const option = document.createElement('option');
+                option.value = model;
+                option.textContent = model;
+                modeloSelect.appendChild(option);
+            });
+        } catch (error) {
+            console.error('Falha ao buscar modelos:', error);
+            const modeloSelect = document.getElementById('modelo');
+            modeloSelect.innerHTML = '<option>Erro ao carregar modelos</option>';
+        }
+    });
 
-    for (const faixa of faixas) {
-        const lastEvent = faixa.eventos.length > 0 ? faixa.eventos[faixa.eventos.length - 1] : { etapa: '-', detalhe: '' };
-        const duracao = faixa.duracao_final ? `${faixa.duracao_final.toFixed(1)}s` : '-';
+    document.getElementById('uploadForm').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        const formData = new FormData(this);
+        const statusDiv = document.getElementById('status');
+        statusDiv.innerHTML = '<p>Enviando e iniciando processamento...</p>';
         
-        tableHTML += `
-            <tr>
-                <td>${faixa.id}</td>
-                <td>${faixa.titulo}</td>
-                <td>${faixa.status}</td>
-                <td>${duracao}</td>
-                <td>${lastEvent.etapa}: ${lastEvent.detalhe || ''}</td>
-                <td>
-                    <button class="toggle-logs" onclick="toggleLogs(${faixa.id})">Ver Logs</button>
-                    ${faixa.caminho_arquivo ? `<a href="/faixas/${faixa.id}/download" target="_blank">Download</a>` : ''}
-                </td>
-            </tr>
-            <tr>
-                <td colspan="6">
-                    <div class="logs-container" id="logs-${faixa.id}">
-                        ${faixa.eventos.map(evt => `
-                            <div class="log-entry">
-                                <span class="log-timestamp">[${new Date(evt.timestamp).toLocaleTimeString()}]</span>
-                                <span class="log-etapa">${evt.etapa}:</span>
-                                ${evt.detalhe || ''}
-                            </div>
-                        `).join('')}
-                    </div>
-                </td>
-            </tr>
+        try {
+            const response = await fetch('/lotes', { method: 'POST', body: formData });
+            if (!response.ok) {
+                const err = await response.json();
+                throw new Error('Falha na criação do lote: ' + (err.detail || response.statusText));
+            }
+            
+            const lote = await response.json();
+            statusDiv.innerHTML = `<h3>Lote ${lote.id} criado com ${lote.total_arquivos} faixas.</h3><div id="progress-table"></div>`;
+            
+            const pollInterval = setInterval(async () => {
+                try {
+                    const res = await fetch('/lotes/' + lote.id);
+                    if (!res.ok) return;
+
+                    const data = await res.json();
+                    renderTable(data.faixas);
+
+                    const allDone = data.faixas.every(f => f.status === 'finalizada' || f.status === 'erro');
+                    if (allDone) {
+                        statusDiv.innerHTML += "<p><strong>Processamento de todas as faixas concluído!</strong></p>";
+                        clearInterval(pollInterval);
+                    }
+                } catch (pollErr) {
+                    console.error("Polling error:", pollErr);
+                }
+            }, 3000);
+        } catch (err) {
+            statusDiv.textContent = 'Erro ao enviar: ' + err.message;
+        }
+    });
+
+    function renderTable(faixas) {
+        const tableContainer = document.getElementById('progress-table');
+        let tableHTML = `
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Título</th>
+                        <th>Status</th>
+                        <th>Duração</th>
+                        <th>Último Evento</th>
+                        <th>Ações</th>
+                    </tr>
+                </thead>
+                <tbody>
         `;
+
+        for (const faixa of faixas) {
+            const lastEvent = faixa.eventos.length > 0 ? faixa.eventos[faixa.eventos.length - 1] : { etapa: '-', detalhe: '' };
+            const duracao = faixa.duracao_final ? `${faixa.duracao_final.toFixed(1)}s` : '-';
+            
+            tableHTML += `
+                <tr>
+                    <td>${faixa.id}</td>
+                    <td>${faixa.titulo}</td>
+                    <td>${faixa.status}</td>
+                    <td>${duracao}</td>
+                    <td>${lastEvent.etapa}: ${lastEvent.detalhe || ''}</td>
+                    <td>
+                        <button class="toggle-logs" onclick="toggleLogs(${faixa.id})">Ver Logs</button>
+                        ${faixa.caminho_arquivo ? `<a href="/faixas/${faixa.id}/download" target="_blank">Download</a>` : ''}
+                    </td>
+                </tr>
+                <tr>
+                    <td colspan="6">
+                        <div class="logs-container" id="logs-${faixa.id}">
+                            ${faixa.eventos.map(evt => `
+                                <div class="log-entry">
+                                    <span class="log-timestamp">[${new Date(evt.timestamp).toLocaleTimeString()}]</span>
+                                    <span class="log-etapa">${evt.etapa}:</span>
+                                    ${evt.detalhe || ''}
+                                </div>
+                            `).join('')}
+                        </div>
+                    </td>
+                </tr>
+            `;
+        }
+
+        tableHTML += '</tbody></table>';
+        tableContainer.innerHTML = tableHTML;
     }
 
-    tableHTML += '</tbody></table>';
-    tableContainer.innerHTML = tableHTML;
-}
-
-function toggleLogs(faixaId) {
-    const logContainer = document.getElementById(`logs-${faixaId}`);
-    if (logContainer) {
-        logContainer.style.display = logContainer.style.display === 'block' ? 'none' : 'block';
+    function toggleLogs(faixaId) {
+        const logContainer = document.getElementById(`logs-${faixaId}`);
+        if (logContainer) {
+            logContainer.style.display = logContainer.style.display === 'block' ? 'none' : 'block';
+        }
     }
-}
 </script>
 </body>
 </html>
