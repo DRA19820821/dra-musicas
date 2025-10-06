@@ -92,9 +92,15 @@ async def _wait_for_completion(session: aiohttp.ClientSession, task_id: str) -> 
                 if status == "SUCCESS":
                     # The API nests track data under data.response.data
                     response = info.get("response", {}) or {}
-                    tracks = response.get("data") or []
+                    # The API nests track data under response.data; however some
+                    # variants may use ``tracks`` instead.  Normalise to a list.
+                    tracks: Any = response.get("data") or response.get("tracks") or []
                     if not isinstance(tracks, list):
-                        raise Exception(f"Unexpected track list type: {type(tracks)}")
+                        # If the response contains a single track dict, wrap it
+                        if isinstance(tracks, dict):
+                            tracks = [tracks]
+                        else:
+                            raise Exception(f"Unexpected track list type: {type(tracks)} in {response}")
                     return tracks
                 elif status in {"FAILURE", "FAILED", "ERROR"}:
                     message = info.get("msg") or data.get("msg") or "unknown error"
@@ -124,13 +130,24 @@ async def _download_audio(session: aiohttp.ClientSession, url: str, output_path:
 
 
 def _map_model(model: str) -> str:
-    """Map the project's model identifiers to the values expected by Suno API."""
-    m = model.lower()
-    if m in {"v5", "chirp-v3-5"}:
-        return "V3_5"
-    if m in {"v4.5", "v4_5", "chirp-v3-0"}:
+    """Map the project's model identifiers to the values expected by Suno API.
+
+    The Suno API defines models ``V3_5``, ``V4``, ``V4_5``, ``V4_5PLUS`` and
+    ``V5``.  The incoming values used by the batch processor are
+    historically ``v5`` and ``v4.5``; this helper converts those to the
+    appropriate Suno names.  Unknown models are upper‑cased with dots
+    replaced by underscores.
+    """
+    m = model.lower().strip()
+    if m in {"v5", "v5.0", "v5_0"}:
+        return "V5"
+    if m in {"v4.5", "v4_5", "v4.5plus", "v4_5plus", "v4.5plus"}:
         return "V4_5"
-    # Fallback to upper-case variant
+    if m in {"v4", "v4.0", "v4_0"}:
+        return "V4"
+    if m in {"v3.5", "v3_5", "chirp-v3-5"}:
+        return "V3_5"
+    # Default mapping
     return model.upper().replace(".", "_")
 
 
@@ -166,15 +183,25 @@ async def custom_generate(
             or os.environ.get("SUNO_CALLBACK_URL")
             or "http://localhost:8000/suno-callback"
         )
+        mapped_model = _map_model(model)
+        # Build payload according to Suno API specification.  We include
+        # negativeTags as an empty string to satisfy the required field and
+        # supply default weights for style/weirdness/audio.  These values can
+        # be adjusted as desired via environment variables.
         payload = {
             "prompt": prompt,
-            # When supplying custom text we enable customMode so that
-            # Suno does not auto‑generate lyrics.
             "customMode": True,
             "style": style,
             "title": title,
             "instrumental": bool(make_instrumental),
-            "model": _map_model(model),
+            "model": mapped_model,
+            "negativeTags": "",
+            # Default weighting parameters (optional in API).  See docs for
+            # details: styleWeight controls adherence to style, weirdnessConstraint
+            # controls creative variation, audioWeight biases audio quality.
+            "styleWeight": float(os.environ.get("SUNO_STYLE_WEIGHT", 0.65)),
+            "weirdnessConstraint": float(os.environ.get("SUNO_WEIRDNESS_CONSTRAINT", 0.65)),
+            "audioWeight": float(os.environ.get("SUNO_AUDIO_WEIGHT", 0.65)),
             "callBackUrl": cb_url,
         }
         logger.info(f"Sending generation request for '{title}' (model={model})")
