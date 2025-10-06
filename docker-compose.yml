@@ -1,4 +1,4 @@
-# docker-compose.yml (CORRIGIDO PARA BUILD LOCAL)
+# docker-compose.yml - Nova API Suno (SunoAI-API)
 services:
   backend:
     build:
@@ -8,32 +8,24 @@ services:
       - ./frontend:/app/frontend:ro
       - ./generated_audio:/app/generated_audio
     environment:
-      - DATABASE_URL=sqlite:///./suno.db
+      - DATABASE_URL=postgresql://user:password@postgres:5432/suno
       - OUTPUT_DIR=/app/generated_audio
+      - SUNO_API_URL=http://suno-api:3000
     ports:
       - "8000:8000"
     depends_on:
+      - postgres
       - suno-api
+    restart: unless-stopped
 
-  # Esta seção agora constrói a imagem a partir da pasta 'suno-api' local.
   suno-api:
-    build: ./suno-api
+    build:
+      context: ./suno-api
     env_file:
-      - .env
-    environment:
-      - BROWSER=chromium
-      - BROWSER_GHOST_CURSOR=false
-      - BROWSER_LOCALE=en
-      - BROWSER_HEADLESS=true
+      - ./suno-api/.env
     ports:
       - "3000:3000"
-    volumes:
-      - ./suno-api/public:/app/public
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
+    restart: unless-stopped
 
   postgres:
     image: postgres:15-alpine
@@ -45,6 +37,13 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
 
 volumes:
   postgres_data:
