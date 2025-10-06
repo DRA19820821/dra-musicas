@@ -1,4 +1,8 @@
-# docker-compose.yml - Nova API Suno (SunoAI-API)
+# docker-compose.yml - Updated to use the official Suno API hosted at
+# sunoapi.org.  This configuration removes the local ``suno-api`` service
+# and instead points the backend directly at the public API.  You must
+# supply a valid API key via the ``SUNO_API_KEY`` environment variable.
+
 services:
   backend:
     build:
@@ -8,23 +12,21 @@ services:
       - ./frontend:/app/frontend:ro
       - ./generated_audio:/app/generated_audio
     environment:
+      # Database connection string.  Use PostgreSQL by default; override
+      # accordingly if you wish to persist data outside the container.
       - DATABASE_URL=postgresql://user:password@postgres:5432/suno
+      # Directory where downloaded audio will be saved
       - OUTPUT_DIR=/app/generated_audio
-      - SUNO_API_URL=http://suno-api:3000
+      # URL of the Suno API.  Include /api/v1 to point at the v1 endpoints.
+      - SUNO_API_URL=https://api.sunoapi.org/api/v1
+      # API key for authenticating with the Suno API.  Define this
+      # variable in your shell or in a .env file before running
+      # ``docker compose up``.
+      - SUNO_API_KEY=${SUNO_API_KEY}
     ports:
       - "8000:8000"
     depends_on:
       - postgres
-      - suno-api
-    restart: unless-stopped
-
-  suno-api:
-    build:
-      context: ./suno-api
-    env_file:
-      - ./suno-api/.env
-    ports:
-      - "3000:3000"
     restart: unless-stopped
 
   postgres:
