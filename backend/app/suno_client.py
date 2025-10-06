@@ -1,12 +1,12 @@
 """
-Cliente para o novo Suno-API (SunoAI-API/Suno-API)
+Cliente para o novo Suno-API (SunoAI-API/Suno-API) - CORRIGIDO
 """
 import asyncio
 import os
 import aiohttp
 import logging
 from pathlib import Path
-from typing import Dict, Tuple, Optional
+from typing import Dict, Tuple, Optional, Union, List
 
 logger = logging.getLogger(__name__)
 
@@ -19,50 +19,59 @@ DOWNLOAD_TIMEOUT = 600  # 10 minutos
 
 async def wait_for_generation(
     session: aiohttp.ClientSession,
-    audio_ids: list,
+    audio_id: str,
     max_wait: float = 480.0,
     poll_interval: float = 5.0
 ) -> Optional[Dict]:
     """
     Aguarda até que a geração seja concluída.
-    
-    A API retorna uma lista com 2 clipes gerados. Pegamos o primeiro.
     """
     elapsed = 0.0
     while elapsed < max_wait:
         try:
-            # Busca o status do primeiro áudio gerado
-            aid = audio_ids[0]["id"]
-            async with session.get(f"{SUNO_API_BASE}/feed/{aid}") as resp:
+            async with session.get(f"{SUNO_API_BASE}/feed/{audio_id}") as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     
+                    logger.info(f"Resposta da API (tipo: {type(data)}): {str(data)[:200]}")
+                    
+                    # Normaliza a resposta
                     if isinstance(data, list) and len(data) > 0:
                         audio_info = data[0]
                     elif isinstance(data, dict):
                         audio_info = data
                     else:
-                        logger.warning(f"Formato inesperado: {data}")
+                        logger.warning(f"Formato inesperado (tipo {type(data)}): {data}")
+                        await asyncio.sleep(poll_interval)
+                        elapsed += poll_interval
+                        continue
+                    
+                    # Verifica se audio_info é realmente um dict
+                    if not isinstance(audio_info, dict):
+                        logger.error(f"audio_info não é dict, é {type(audio_info)}: {audio_info}")
                         await asyncio.sleep(poll_interval)
                         elapsed += poll_interval
                         continue
                     
                     status = audio_info.get("status")
                     
-                    logger.info(f"Status da geração {aid}: {status}")
+                    logger.info(f"Status da geração {audio_id}: {status}")
                     
                     if status == "complete":
                         return audio_info
                     elif status == "error":
                         error_msg = audio_info.get("error_message", "Erro desconhecido")
                         raise Exception(f"Erro na geração Suno: {error_msg}")
+                else:
+                    logger.warning(f"Status HTTP {resp.status} ao verificar geração")
+                    
         except Exception as e:
             logger.warning(f"Erro ao verificar status: {e}")
         
         await asyncio.sleep(poll_interval)
         elapsed += poll_interval
     
-    raise TimeoutError(f"Timeout aguardando geração do áudio")
+    raise TimeoutError(f"Timeout aguardando geração do áudio {audio_id}")
 
 
 async def download_audio(
@@ -116,6 +125,7 @@ async def custom_generate(
         }
         
         logger.info(f"Gerando música: {title} | Estilo: {style}")
+        logger.debug(f"Payload: {payload}")
         
         # Envia requisição
         async with session.post(
@@ -129,28 +139,57 @@ async def custom_generate(
             
             result = await resp.json()
             
-            # A API retorna uma lista com 2 clipes gerados
-            if not result or len(result) == 0:
-                raise Exception("API Suno não retornou dados")
+            # Log detalhado da resposta
+            logger.info(f"Resposta da API /generate (tipo: {type(result)}): {str(result)[:500]}")
             
-            # Pega o primeiro clipe
-            audio_info = result[0]
-            audio_id = audio_info.get("id")
+            # A API pode retornar diferentes formatos
+            if isinstance(result, str):
+                # Verifica se é uma mensagem de erro
+                if "error" in result.lower() or "503" in result:
+                    raise Exception(f"Erro retornado pela API Suno: {result}")
+                # Se retornou uma string, pode ser apenas o ID
+                audio_id = result
+                logger.info(f"API retornou string (ID): {audio_id}")
+            elif isinstance(result, list):
+                if len(result) == 0:
+                    raise Exception("API Suno retornou lista vazia")
+                
+                # Pega o primeiro item
+                first_item = result[0]
+                
+                if isinstance(first_item, str):
+                    audio_id = first_item
+                elif isinstance(first_item, dict):
+                    audio_id = first_item.get("id")
+                    if not audio_id:
+                        raise Exception(f"Objeto sem 'id': {first_item}")
+                else:
+                    raise Exception(f"Formato inesperado no array: {type(first_item)}")
+                    
+            elif isinstance(result, dict):
+                audio_id = result.get("id")
+                if not audio_id:
+                    raise Exception(f"Resposta dict sem 'id': {result}")
+            else:
+                raise Exception(f"Formato de resposta não suportado: {type(result)}")
             
             if not audio_id:
-                raise Exception("ID de geração não encontrado")
+                raise Exception(f"ID de geração não encontrado na resposta: {result}")
             
             logger.info(f"Geração iniciada com ID: {audio_id}")
             
             # Aguarda conclusão
-            audio_info = await wait_for_generation(session, result)
+            audio_info = await wait_for_generation(session, audio_id)
+            
+            if not isinstance(audio_info, dict):
+                raise Exception(f"wait_for_generation retornou tipo inválido: {type(audio_info)}")
             
             # Extrai URL do áudio
             audio_url = audio_info.get("audio_url")
             video_url = audio_info.get("video_url")
             
             if not audio_url:
-                raise Exception("URL de áudio não encontrada")
+                raise Exception(f"URL de áudio não encontrada em: {audio_info}")
             
             # Determina formato
             is_wav = audio_url.lower().endswith('.wav')
@@ -170,7 +209,7 @@ async def custom_generate(
             
             urls = {
                 "audio_url": str(output_path),
-                "video_url": video_url,
+                "video_url": video_url or "",
                 "original_audio_url": audio_url
             }
             
@@ -210,18 +249,28 @@ async def extend_audio(
             
             result = await resp.json()
             
-            if not result or len(result) == 0:
-                raise Exception("API não retornou dados de extensão")
+            logger.info(f"Resposta extend (tipo: {type(result)}): {str(result)[:500]}")
             
-            audio_info = result[0]
-            audio_id = audio_info.get("id")
+            # Extrai ID da resposta
+            if isinstance(result, str):
+                audio_id = result
+            elif isinstance(result, list) and len(result) > 0:
+                first = result[0]
+                audio_id = first if isinstance(first, str) else first.get("id")
+            elif isinstance(result, dict):
+                audio_id = result.get("id")
+            else:
+                raise Exception(f"Formato de resposta extend não suportado: {type(result)}")
+            
+            if not audio_id:
+                raise Exception("ID não encontrado na resposta de extend")
             
             # Aguarda conclusão
-            audio_info = await wait_for_generation(session, result)
+            audio_info = await wait_for_generation(session, audio_id)
             
             audio_url = audio_info.get("audio_url")
             if not audio_url:
-                raise Exception("URL de áudio estendido não encontrada")
+                raise Exception(f"URL de áudio estendido não encontrada em: {audio_info}")
             
             is_wav = audio_url.lower().endswith('.wav')
             extension = 'wav' if is_wav else 'mp3'
