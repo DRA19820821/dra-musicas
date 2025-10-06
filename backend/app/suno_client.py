@@ -93,8 +93,13 @@ async def _wait_for_completion(session: aiohttp.ClientSession, task_id: str) -> 
                     # The API nests track data under data.response.data
                     response = info.get("response", {}) or {}
                     # The API nests track data under response.data; however some
-                    # variants may use ``tracks`` instead.  Normalise to a list.
-                    tracks: Any = response.get("data") or response.get("tracks") or []
+                    # versions use ``tracks`` or ``sunoData``.  Normalise to a list.
+                    tracks: Any = (
+                        response.get("data")
+                        or response.get("tracks")
+                        or response.get("sunoData")
+                        or []
+                    )
                     if not isinstance(tracks, list):
                         # If the response contains a single track dict, wrap it
                         if isinstance(tracks, dict):
@@ -220,12 +225,19 @@ async def custom_generate(
         if not tracks:
             raise Exception("No tracks returned from API on completion")
         track = tracks[0]
-        # Extract identifiers
+        # Extract identifiers.  Suno's response uses ``id`` and ``audioUrl``.
         audio_id: str = track.get("id") or track.get("audioId") or track.get("audio_id")
-        audio_url: Optional[str] = track.get("audio_url") or track.get("url")
+        # Accept both camelCase and snake_case keys for the audio URL
+        audio_url: Optional[str] = (
+            track.get("audioUrl")
+            or track.get("audio_url")
+            or track.get("url")
+            or track.get("streamAudioUrl")
+        )
         if not audio_id or not audio_url:
             raise Exception(f"Incomplete track information: {track}")
-        # Determine extension and download
+        # Determine extension and download.  If the URL ends with .wav then it's WAV,
+        # otherwise default to MP3.
         ext = "wav" if audio_url.lower().endswith(".wav") else "mp3"
         output_path = OUTPUT_DIR / f"{audio_id}.{ext}"
         await _download_audio(session, audio_url, str(output_path))
@@ -287,7 +299,12 @@ async def extend_audio(
             raise Exception("No tracks returned for extension task")
         track = tracks[0]
         audio_id: str = track.get("id") or track.get("audioId") or track.get("audio_id")
-        audio_url: Optional[str] = track.get("audio_url") or track.get("url")
+        audio_url: Optional[str] = (
+            track.get("audioUrl")
+            or track.get("audio_url")
+            or track.get("url")
+            or track.get("streamAudioUrl")
+        )
         if not audio_id or not audio_url:
             raise Exception(f"Incomplete track info in extension result: {track}")
         ext = "wav" if audio_url.lower().endswith(".wav") else "mp3"
